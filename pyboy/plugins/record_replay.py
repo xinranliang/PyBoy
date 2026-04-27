@@ -68,12 +68,9 @@ class RecordReplay(PyBoyPlugin):
         self.record_trajectory = bool(self.pyboy_argv.get("record_trajectory"))
         self.trajectory_resize = max(1, int(self.pyboy_argv.get("record_trajectory_resize", 1)))
         self.trajectory_output_path = None
-<<<<<<< HEAD
-=======
         self.last_powerup_status = 0
         self.last_powerup_timer = 0
         self.last_superball_status = 0
->>>>>>> 3176b9a (update game agent recording utils to record more mario status)
         if self.record_trajectory:
             root = Path(self.pyboy_argv.get("record_trajectory_dir") or "human_replay")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -146,8 +143,6 @@ class RecordReplay(PyBoyPlugin):
                 action_parts.append(btn)
         return "_".join(action_parts) if action_parts else "NOOP"
 
-<<<<<<< HEAD
-=======
     def _powerup_status_name(self, status):
         powerup_status_names = {
             0x00: "small",
@@ -158,20 +153,16 @@ class RecordReplay(PyBoyPlugin):
         }
         return powerup_status_names.get(int(status), f"unknown_{int(status)}")
 
->>>>>>> 3176b9a (update game agent recording utils to record more mario status)
     def _mario_state(self):
         try:
             mario = self.pyboy.game_wrapper
             world_tuple = mario.world
-<<<<<<< HEAD
-=======
             powerup_status = int(self.pyboy.memory[0xFF99]) if self.pyboy else 0
             powerup_timer = int(self.pyboy.memory[0xFFA6]) if self.pyboy else 0
             superball_status = int(self.pyboy.memory[0xFFB5]) if self.pyboy else 0
             self.last_powerup_status = powerup_status
             self.last_powerup_timer = powerup_timer
             self.last_superball_status = superball_status
->>>>>>> 3176b9a (update game agent recording utils to record more mario status)
             return {
                 "world": world_tuple[0] if world_tuple and len(world_tuple) > 0 else None,
                 "level": world_tuple[1] if world_tuple and len(world_tuple) > 1 else None,
@@ -182,15 +173,12 @@ class RecordReplay(PyBoyPlugin):
                 "time_left": int(mario.time_left),
                 "game_over": mario.game_over(),
                 "death_animation": int(self.pyboy.memory[0xFFA6]) if self.pyboy else 0,
-<<<<<<< HEAD
-=======
                 "powerup_status": powerup_status,
                 "powerup_status_name": self._powerup_status_name(powerup_status),
                 "powerup_timer": powerup_timer,
                 "superball_status": superball_status,
                 "has_superball": bool(superball_status),
                 "is_dead_or_respawning": powerup_timer > 0x80,
->>>>>>> 3176b9a (update game agent recording utils to record more mario status)
             }
         except Exception:
             return {
@@ -203,15 +191,12 @@ class RecordReplay(PyBoyPlugin):
                 "time_left": 0,
                 "game_over": False,
                 "death_animation": 0,
-<<<<<<< HEAD
-=======
                 "powerup_status": 0,
                 "powerup_status_name": "small",
                 "powerup_timer": 0,
                 "superball_status": 0,
                 "has_superball": False,
                 "is_dead_or_respawning": False,
->>>>>>> 3176b9a (update game agent recording utils to record more mario status)
             }
 
     def _save_trajectory_step(self, events):
