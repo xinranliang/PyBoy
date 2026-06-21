@@ -19,6 +19,19 @@ from pyboy.plugins.base_plugin import PyBoyPlugin
 
 logger = pyboy.logging.get_logger(__name__)
 
+KIRBY_GAME_STATE_NAMES = {
+    0x01: "normal",
+    0x05: "drinking bottle",
+    0x06: "warpstar/dying/transition",
+}
+
+KIRBY_MOUTH_INFO_NAMES = {
+    0x00: "empty",
+    0x02: "filled with air",
+    0x03: "inhaling",
+    0x04: "holding inhaled object",
+}
+
 
 class RecordReplay(PyBoyPlugin):
     argv = [
@@ -68,9 +81,6 @@ class RecordReplay(PyBoyPlugin):
         self.record_trajectory = bool(self.pyboy_argv.get("record_trajectory"))
         self.trajectory_resize = max(1, int(self.pyboy_argv.get("record_trajectory_resize", 1)))
         self.trajectory_output_path = None
-        self.last_powerup_status = 0
-        self.last_powerup_timer = 0
-        self.last_superball_status = 0
         if self.record_trajectory:
             root = Path(self.pyboy_argv.get("record_trajectory_dir") or "human_replay")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -143,27 +153,81 @@ class RecordReplay(PyBoyPlugin):
                 action_parts.append(btn)
         return "_".join(action_parts) if action_parts else "NOOP"
 
-    def _powerup_status_name(self, status):
-        powerup_status_names = {
-            0x00: "small",
-            0x01: "growing",
-            0x02: "big",
-            0x03: "shrinking",
-            0x04: "invincibility_blinking",
-        }
-        return powerup_status_names.get(int(status), f"unknown_{int(status)}")
+    def _detect_game_type(self):
+        wrapper = self.pyboy.game_wrapper
+        title = (getattr(wrapper, "cartridge_title", "") or "").upper()
+        wrapper_name = type(wrapper).__name__.upper()
+        if "KIRBY" in title or "KIRBY" in wrapper_name:
+            return "kirby_dream_land"
+        if "MARIO" in title or "MARIO" in wrapper_name:
+            return "super_mario_land"
+        return "unknown"
+
+    def _read_u8(self, address):
+        return int(self.pyboy.memory[address])
+
+    def _kirby_signed_speed(self, pixel_addr, subpixel_addr):
+        pixel = self._read_u8(pixel_addr)
+        if pixel >= 0x80:
+            pixel -= 0x100
+        subpixel = self._read_u8(subpixel_addr) / 256.0
+        if pixel < 0:
+            return pixel - subpixel
+        return pixel + subpixel
+
+    def _kirby_state(self):
+        try:
+            kirby = self.pyboy.game_wrapper
+            game_state = self._read_u8(0xD02C)
+            mouth_info = self._read_u8(0xD094)
+            return {
+                "game": "kirby_dream_land",
+                "level_progress": float(self._read_u8(0xD051)),
+                "score": int(kirby.score),
+                "health": int(kirby.health),
+                "lives_left": int(kirby.lives_left),
+                "game_over": bool(kirby.game_over()),
+                "game_state": game_state,
+                "game_state_name": KIRBY_GAME_STATE_NAMES.get(game_state, f"unknown/state_{game_state:#04x}"),
+                "kirby_screen_x": self._read_u8(0xD05C),
+                "kirby_screen_y": self._read_u8(0xD05D),
+                "visual_scroll_x": self._read_u8(0xD053),
+                "visual_scroll_y": self._read_u8(0xD055),
+                "x_speed": float(self._kirby_signed_speed(0xD074, 0xD075)),
+                "y_speed": float(self._kirby_signed_speed(0xD078, 0xD079)),
+                "boss_health": self._read_u8(0xD093),
+                "mouth_info": mouth_info,
+                "mouth_info_name": KIRBY_MOUTH_INFO_NAMES.get(mouth_info, f"unknown/mouth_{mouth_info:#04x}"),
+                "inhale_timer": self._read_u8(0xD066),
+            }
+        except Exception:
+            return {
+                "game": "kirby_dream_land",
+                "level_progress": 0.0,
+                "score": 0,
+                "health": 0,
+                "lives_left": 0,
+                "game_over": False,
+                "game_state": 0,
+                "game_state_name": "unknown",
+                "kirby_screen_x": 0,
+                "kirby_screen_y": 0,
+                "visual_scroll_x": 0,
+                "visual_scroll_y": 0,
+                "x_speed": 0.0,
+                "y_speed": 0.0,
+                "boss_health": 0,
+                "mouth_info": 0,
+                "mouth_info_name": "unknown",
+                "inhale_timer": 0,
+            }
 
     def _mario_state(self):
         try:
             mario = self.pyboy.game_wrapper
             world_tuple = mario.world
-            powerup_status = int(self.pyboy.memory[0xFF99]) if self.pyboy else 0
-            powerup_timer = int(self.pyboy.memory[0xFFA6]) if self.pyboy else 0
-            superball_status = int(self.pyboy.memory[0xFFB5]) if self.pyboy else 0
-            self.last_powerup_status = powerup_status
-            self.last_powerup_timer = powerup_timer
-            self.last_superball_status = superball_status
             return {
+                "game": "super_mario_land",
                 "world": world_tuple[0] if world_tuple and len(world_tuple) > 0 else None,
                 "level": world_tuple[1] if world_tuple and len(world_tuple) > 1 else None,
                 "level_progress": float(mario.level_progress),
@@ -173,15 +237,10 @@ class RecordReplay(PyBoyPlugin):
                 "time_left": int(mario.time_left),
                 "game_over": mario.game_over(),
                 "death_animation": int(self.pyboy.memory[0xFFA6]) if self.pyboy else 0,
-                "powerup_status": powerup_status,
-                "powerup_status_name": self._powerup_status_name(powerup_status),
-                "powerup_timer": powerup_timer,
-                "superball_status": superball_status,
-                "has_superball": bool(superball_status),
-                "is_dead_or_respawning": powerup_timer > 0x80,
             }
         except Exception:
             return {
+                "game": "super_mario_land",
                 "world": None,
                 "level": None,
                 "level_progress": 0.0,
@@ -191,13 +250,15 @@ class RecordReplay(PyBoyPlugin):
                 "time_left": 0,
                 "game_over": False,
                 "death_animation": 0,
-                "powerup_status": 0,
-                "powerup_status_name": "small",
-                "powerup_timer": 0,
-                "superball_status": 0,
-                "has_superball": False,
-                "is_dead_or_respawning": False,
             }
+
+    def _game_state(self):
+        game_type = self._detect_game_type()
+        if game_type == "kirby_dream_land":
+            return self._kirby_state()
+        if game_type == "super_mario_land":
+            return self._mario_state()
+        return {"game": game_type}
 
     def _save_trajectory_step(self, events):
         if not self.trajectory_output_path:
@@ -221,7 +282,7 @@ class RecordReplay(PyBoyPlugin):
             "button_events": [int(e) for e in events],
             "pressed_buttons": sorted(list(self.current_pressed_buttons)),
             "image_path": str(image_path),
-            **self._mario_state(),
+            **self._game_state(),
         }
 
         with open(interaction_path, "w") as f:
@@ -242,8 +303,12 @@ class RecordReplay(PyBoyPlugin):
                 base64.b64encode(np.ascontiguousarray(self.pyboy.screen.ndarray[:, :, :-1])).decode("utf8"),
             )
         )
-        if self.record_trajectory and self.pyboy.frame_count >= 100:
-            self._save_trajectory_step(events)
+        if self.record_trajectory:
+            game_type = self._detect_game_type()
+            min_frame = 230 if game_type == "kirby_dream_land" else 100
+            should_record = self.pyboy.frame_count > min_frame if game_type == "kirby_dream_land" else self.pyboy.frame_count >= min_frame
+            if should_record:
+                self._save_trajectory_step(events)
         return events
 
     def stop(self):
