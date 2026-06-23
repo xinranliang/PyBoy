@@ -17,4 +17,6 @@ cdef class RecordReplay(PyBoyPlugin):
     cdef public bint record_trajectory
     cdef public int trajectory_resize
     cdef public object trajectory_output_path
-
+    cdef public int last_powerup_status
+    cdef public int last_powerup_timer
+    cdef public int last_superball_status
